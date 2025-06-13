@@ -1,0 +1,48 @@
+services:
+  cassandra:
+    image: cassandra:4.1
+    container_name: url-shortener-cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=UrlShortenerCluster
+      - CASSANDRA_DC=datacenter1
+      - CASSANDRA_RACK=rack1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+      - ./docker/cassandra/init.cql:/docker-entrypoint-initdb.d/init.cql
+    networks:
+      - url-shortener-network
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: url-shortener-api
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - Cassandra__ContactPoints=cassandra
+      - Cassandra__Port=9042
+      - Cassandra__Keyspace=urlshortener
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    networks:
+      - url-shortener-network
+
+volumes:
+  cassandra_data:
+
+networks:
+  url-shortener-network:
+    driver: bridge
