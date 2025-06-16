@@ -1,8 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using URLShortener.Infrastructure.Services;
+using URLShortener.Application.Services;
 
-namespace URLShortener.Api.Controllers
-{
+namespace URLShortener.Api.Controllers;
+
     [ApiController]
     public class RedirectController : ControllerBase
     {
@@ -32,6 +32,7 @@ namespace URLShortener.Api.Controllers
                     return BadRequest("Invalid URL format");
                 }
 
+                // Record analytics using fire-and-forget pattern
                 var userAgent = Request.Headers.UserAgent.ToString();
                 var ipAddress = GetClientIpAddress();
 
@@ -55,7 +56,6 @@ namespace URLShortener.Api.Controllers
                 return StatusCode(500, "Internal server error");
             }
         }
-
         private string GetClientIpAddress()
         {
             var forwardedFor = Request.Headers["X-Forwarded-For"].FirstOrDefault();
@@ -69,7 +69,9 @@ namespace URLShortener.Api.Controllers
             {
                 return realIp;
             }
+
             return Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         }
     }
-}
+
+

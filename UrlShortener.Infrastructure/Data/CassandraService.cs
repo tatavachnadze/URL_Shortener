@@ -1,27 +1,16 @@
 ﻿using Cassandra;
+using URLShortener.Application.Dtos;
 using Microsoft.Extensions.Logging;
-using URLShortener.Core.Models;
+using URLShortener.Domain.Models;
+using URLShortener.Application.Services;
 
 namespace URLShortener.Infrastructure.Data;
-
-public interface ICassandraService
-{
-    Task<Url?> GetUrlAsync(string shortCode);
-    Task<bool> CreateUrlAsync(Url url);
-    Task<bool> UpdateUrlAsync(string shortCode, UpdateUrlRequest request);
-    Task<bool> DeleteUrlAsync(string shortCode);
-    Task<bool> IncrementClickCountAsync(string shortCode);
-    Task<bool> AddAnalyticsAsync(UrlAnalytics analytics);
-    Task<List<UrlAnalytics>> GetAnalyticsAsync(string shortCode, int limit = 10);
-    Task<bool> ExistsAsync(string shortCode);
-    Task<List<Url>> GetExpiredUrlsAsync();
-    Task<bool> DeactivateUrlAsync(string shortCode);
-}
 
 public class CassandraService : ICassandraService
 {
     private readonly ISession _session;
     private readonly ILogger<CassandraService> _logger;
+
     private PreparedStatement? _getUrlStatement;
     private PreparedStatement? _getClickCountStatement;
     private PreparedStatement? _insertUrlStatement;
@@ -76,12 +65,13 @@ public class CassandraService : ICassandraService
         _getAnalyticsStatement = _session.Prepare(
             "SELECT short_code, click_date, click_timestamp, user_agent, ip_address FROM url_analytics WHERE short_code = ? LIMIT ?");
     }
-
     public async Task<Url?> GetUrlAsync(string shortCode)
     {
         var row = await _session.ExecuteAsync(_getUrlStatement!.Bind(shortCode));
         var firstRow = row.FirstOrDefault();
-        if (firstRow == null) return null;        
+
+        if (firstRow == null) return null;
+
         var clickCount = 0L;
         try
         {
@@ -96,17 +86,16 @@ public class CassandraService : ICassandraService
         {
             _logger.LogWarning(ex, "Failed to get click count for {ShortCode}", shortCode);
         }
-
-        return new Url
-        {
-            ShortCode = firstRow.GetValue<string>("short_code"),
-            OriginalUrl = firstRow.GetValue<string>("original_url"),
-            CreatedAt = firstRow.GetValue<DateTime>("created_at"),
-            ExpiresAt = firstRow.GetValue<DateTime?>("expires_at"),
-            ClickCount = clickCount,
-            IsActive = firstRow.GetValue<bool>("is_active"),
-            CustomAlias = firstRow.GetValue<bool>("custom_alias")
-        };
+       
+        return new Url(
+            firstRow.GetValue<string>("short_code"),
+            firstRow.GetValue<string>("original_url"),
+            firstRow.GetValue<DateTime>("created_at"),
+            firstRow.GetValue<DateTime?>("expires_at"),
+            clickCount,
+            firstRow.GetValue<bool>("is_active"),
+            firstRow.GetValue<bool>("custom_alias")
+        );
     }
 
     public async Task<bool> CreateUrlAsync(Url url)
@@ -128,7 +117,6 @@ public class CassandraService : ICassandraService
             return false;
         }
     }
-
     public async Task<bool> UpdateUrlAsync(string shortCode, UpdateUrlRequest request)
     {
         try
@@ -136,9 +124,12 @@ public class CassandraService : ICassandraService
             var existingUrl = await GetUrlAsync(shortCode);
             if (existingUrl == null) return false;
 
+            // Use domain model business logic for updates
+            existingUrl.UpdateDetails(request.OriginalUrl, request.ExpiresAt);
+
             await _session.ExecuteAsync(_updateUrlStatement!.Bind(
-                request.OriginalUrl ?? existingUrl.OriginalUrl,
-                request.ExpiresAt ?? existingUrl.ExpiresAt,
+                existingUrl.OriginalUrl,
+                existingUrl.ExpiresAt,
                 shortCode));
             return true;
         }
@@ -148,7 +139,6 @@ public class CassandraService : ICassandraService
             return false;
         }
     }
-
     public async Task<bool> DeleteUrlAsync(string shortCode)
     {
         try
@@ -162,7 +152,6 @@ public class CassandraService : ICassandraService
             return false;
         }
     }
-
     public async Task<bool> IncrementClickCountAsync(string shortCode)
     {
         try
@@ -176,7 +165,6 @@ public class CassandraService : ICassandraService
             return false;
         }
     }
-
     public async Task<bool> AddAnalyticsAsync(UrlAnalytics analytics)
     {
         try
@@ -195,41 +183,35 @@ public class CassandraService : ICassandraService
             return false;
         }
     }
-
     public async Task<List<UrlAnalytics>> GetAnalyticsAsync(string shortCode, int limit = 10)
     {
         var rows = await _session.ExecuteAsync(_getAnalyticsStatement!.Bind(shortCode, limit));
-        return rows.Select(row => new UrlAnalytics
-        {
-            ShortCode = row.GetValue<string>("short_code"),
-            ClickDate = row.GetValue<DateTime>("click_date"),
-            ClickTimestamp = row.GetValue<DateTime>("click_timestamp"),
-            UserAgent = row.GetValue<string>("user_agent"),
-            IpAddress = row.GetValue<string>("ip_address")
-        }).ToList();
+        return rows.Select(row => new UrlAnalytics(
+            row.GetValue<string>("short_code"),
+            row.GetValue<DateTime>("click_date"),
+            row.GetValue<DateTime>("click_timestamp"),
+            row.GetValue<string>("user_agent"),
+            row.GetValue<string>("ip_address")
+        )).ToList();
     }
-
     public async Task<bool> ExistsAsync(string shortCode)
     {
         var rows = await _session.ExecuteAsync(_existsStatement!.Bind(shortCode));
         return rows.Any();
     }
-
     public async Task<List<Url>> GetExpiredUrlsAsync()
     {
         var rows = await _session.ExecuteAsync(_getExpiredStatement!.Bind(DateTime.UtcNow));
-        return rows.Select(row => new Url
-        {
-            ShortCode = row.GetValue<string>("short_code"),
-            OriginalUrl = row.GetValue<string>("original_url"),
-            CreatedAt = row.GetValue<DateTime>("created_at"),
-            ExpiresAt = row.GetValue<DateTime?>("expires_at"),
-            ClickCount = 0,
-            IsActive = row.GetValue<bool>("is_active"),
-            CustomAlias = row.GetValue<bool>("custom_alias")
-        }).ToList();
+        return rows.Select(row => new Url(
+            row.GetValue<string>("short_code"),
+            row.GetValue<string>("original_url"),
+            row.GetValue<DateTime>("created_at"),
+            row.GetValue<DateTime?>("expires_at"),
+            0, // Click count will be retrieved separately if needed
+            row.GetValue<bool>("is_active"),
+            row.GetValue<bool>("custom_alias")
+        )).ToList();
     }
-
     public async Task<bool> DeactivateUrlAsync(string shortCode)
     {
         try

@@ -1,25 +1,12 @@
 ﻿using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using URLShortener.Core.Models;
-using URLShortener.Core.Services;
-using URLShortener.Infrastructure.Data;
+using URLShortener.Application.Dtos;
+using URLShortener.Application.Extensions;
+using URLShortener.Application.Services;
+using URLShortener.Domain.Models;
 
 namespace URLShortener.Infrastructure.Services
 {
-    public interface IUrlService
-    {
-        Task<UrlResponse?> CreateUrlAsync(CreateUrlRequest request, string baseUrl);
-        Task<UrlDetailsResponse?> GetUrlDetailsAsync(string shortCode, string baseUrl);
-        Task<string?> GetOriginalUrlAsync(string shortCode);
-        Task<bool> UpdateUrlAsync(string shortCode, UpdateUrlRequest request);
-        Task<bool> DeleteUrlAsync(string shortCode);
-        Task<bool> RecordClickAsync(string shortCode, string userAgent, string ipAddress);
-    }
-
+    
     public class UrlService : IUrlService
     {
         private readonly ICassandraService _cassandraService;
@@ -35,10 +22,17 @@ namespace URLShortener.Infrastructure.Services
 
         public async Task<UrlResponse?> CreateUrlAsync(CreateUrlRequest request, string baseUrl)
         {
-            string shortCode;
-            if (!string.IsNullOrEmpty(request.CustomAlias))
+            if (!request.IsValid)
             {
-                shortCode = request.CustomAlias;
+                _logger.LogWarning("Invalid create URL request: OriginalUrl is empty");
+                return null;
+            }
+
+            string shortCode;
+
+            if (request.HasCustomAlias)
+            {
+                shortCode = request.CustomAlias!;
                 if (await _cassandraService.ExistsAsync(shortCode))
                 {
                     _logger.LogWarning("Custom alias {Alias} already exists", shortCode);
@@ -54,57 +48,38 @@ namespace URLShortener.Infrastructure.Services
                 }
             }
 
-            var url = new Url
-            {
-                ShortCode = shortCode,
-                OriginalUrl = request.OriginalUrl,
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = request.ExpiresAt,
-                IsActive = true,
-                CustomAlias = !string.IsNullOrEmpty(request.CustomAlias)
-            };
+            // Use business constructor for new URL creation
+            var url = new Url(shortCode, request.OriginalUrl, request.ExpiresAt, request.HasCustomAlias);
 
             var success = await _cassandraService.CreateUrlAsync(url);
             if (!success)
             {
-                _logger.LogError("Failed to create URL in database");
+                _logger.LogError("Failed to create URL in database for short code {ShortCode}", shortCode);
                 return null;
             }
 
-            return new UrlResponse
-            {
-                ShortCode = url.ShortCode,
-                OriginalUrl = url.OriginalUrl,
-                ShortUrl = $"{baseUrl.TrimEnd('/')}/{url.ShortCode}",
-                CreatedAt = url.CreatedAt,
-                ExpiresAt = url.ExpiresAt,
-                ClickCount = 0,
-                IsActive = url.IsActive,
-                IsExpired = url.IsExpired,
-                IsPermanent = url.IsPermanent
-            };
+            _logger.LogInformation("Successfully created URL with short code {ShortCode}", shortCode);
+
+            // Use mapping extension for response creation
+            return url.ToResponse(baseUrl);
         }
 
         public async Task<UrlDetailsResponse?> GetUrlDetailsAsync(string shortCode, string baseUrl)
         {
             var url = await _cassandraService.GetUrlAsync(shortCode);
-            if (url == null) return null;
+            if (url == null)
+            {
+                _logger.LogWarning("URL not found for short code {ShortCode}", shortCode);
+                return null;
+            }
 
             var analytics = await _cassandraService.GetAnalyticsAsync(shortCode);
 
-            return new UrlDetailsResponse
-            {
-                ShortCode = url.ShortCode,
-                OriginalUrl = url.OriginalUrl,
-                ShortUrl = $"{baseUrl.TrimEnd('/')}/{url.ShortCode}",
-                CreatedAt = url.CreatedAt,
-                ExpiresAt = url.ExpiresAt,
-                ClickCount = url.ClickCount,
-                IsActive = url.IsActive,
-                IsExpired = url.IsExpired,
-                IsPermanent = url.IsPermanent,
-                RecentClicks = analytics
-            };
+            _logger.LogInformation("Retrieved URL details for {ShortCode} with {AnalyticsCount} analytics records",
+                shortCode, analytics.Count);
+
+            // Use mapping extension for detailed response creation
+            return url.ToDetailsResponse(baseUrl, analytics);
         }
 
         public async Task<string?> GetOriginalUrlAsync(string shortCode)
@@ -119,43 +94,72 @@ namespace URLShortener.Infrastructure.Services
                 return null;
             }
 
-            _logger.LogInformation("Found URL: Active={IsActive}, Expired={IsExpired}, OriginalUrl={OriginalUrl}",
-                url.IsActive, url.IsExpired, url.OriginalUrl);
-
-            if (!url.IsActive || url.IsExpired)
+            // Use domain model business logic method
+            if (!url.CanBeAccessed())
             {
-                _logger.LogWarning("URL is inactive or expired: {ShortCode}", shortCode);
+                _logger.LogWarning("URL cannot be accessed: {ShortCode} - Active: {IsActive}, Expired: {IsExpired}",
+                    shortCode, url.IsActive, url.IsExpired);
                 return null;
             }
 
+            _logger.LogInformation("Successfully retrieved original URL for {ShortCode}", shortCode);
             return url.OriginalUrl;
         }
 
         public async Task<bool> UpdateUrlAsync(string shortCode, UpdateUrlRequest request)
         {
-            return await _cassandraService.UpdateUrlAsync(shortCode, request);
+            if (!request.HasAnyUpdates)
+            {
+                _logger.LogWarning("Update request for {ShortCode} contains no updates", shortCode);
+                return false;
+            }
+
+            var success = await _cassandraService.UpdateUrlAsync(shortCode, request);
+
+            if (success)
+            {
+                _logger.LogInformation("Successfully updated URL {ShortCode}", shortCode);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to update URL {ShortCode}", shortCode);
+            }
+
+            return success;
         }
 
         public async Task<bool> DeleteUrlAsync(string shortCode)
         {
-            return await _cassandraService.DeleteUrlAsync(shortCode);
+            var success = await _cassandraService.DeleteUrlAsync(shortCode);
+
+            if (success)
+            {
+                _logger.LogInformation("Successfully deleted URL {ShortCode}", shortCode);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to delete URL {ShortCode}", shortCode);
+            }
+
+            return success;
         }
 
         public async Task<bool> RecordClickAsync(string shortCode, string userAgent, string ipAddress)
         {
             try
             {
+                // Increment click counter
                 await _cassandraService.IncrementClickCountAsync(shortCode);
-                var analytics = new UrlAnalytics
-                {
-                    ShortCode = shortCode,
-                    ClickDate = DateTime.UtcNow.Date,
-                    ClickTimestamp = DateTime.UtcNow,
-                    UserAgent = userAgent,
-                    IpAddress = ipAddress
-                };
 
+                // Use business constructor for analytics creation
+                var analytics = new UrlAnalytics(shortCode, userAgent, ipAddress);
+
+                // Store analytics data
                 await _cassandraService.AddAnalyticsAsync(analytics);
+
+                _logger.LogDebug("Successfully recorded click for {ShortCode} from IP {IpAddress}",
+                    shortCode, ipAddress);
+
                 return true;
             }
             catch (Exception ex)

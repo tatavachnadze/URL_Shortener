@@ -1,13 +1,8 @@
 ﻿using System.Text;
+using URLShortener.Application.Services;
 
-namespace URLShortener.Core.Services
-{
-    public interface IBase62Encoder
-    {
-        string Encode(long number);
-        long Decode(string encoded);
-        string GenerateShortCode();
-    }
+namespace URLShortener.Core.Services;
+
 
     public class Base62Encoder : IBase62Encoder
     {
@@ -132,4 +127,4 @@ namespace URLShortener.Core.Services
                 throw new ArgumentException($"Worker ID must be between 0 and {MaxWorkerId}");
         }
     }
-}
+

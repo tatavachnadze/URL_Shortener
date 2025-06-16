@@ -4,7 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using URLShortener.Core.Models;
+using URLShortener.Application.Dtos;
+using URLShortener.Domain.Models;
 
 namespace URLShortener.Core.Validators;
 

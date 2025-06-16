@@ -1,10 +1,10 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
-using URLShortener.Core.Models;
-using URLShortener.Infrastructure.Services;
+using URLShortener.Application.Dtos;
+using URLShortener.Application.Services;
 
-namespace URLShortener.Api.Controllers
-{
+namespace URLShortener.Api.Controllers;
+
     [ApiController]
     [Route("api/[controller]")]
     public class UrlsController : ControllerBase
@@ -29,14 +29,23 @@ namespace URLShortener.Api.Controllers
         [HttpPost]
         public async Task<ActionResult<UrlResponse>> CreateUrl([FromBody] CreateUrlRequest request)
         {
+            if (!request.IsValid)
+            {
+                return BadRequest("Invalid request: Original URL is required");
+            }
             var validationResult = await _createValidator.ValidateAsync(request);
             if (!validationResult.IsValid)
             {
                 return BadRequest(validationResult.Errors.Select(e => e.ErrorMessage));
             }
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            if (request.HasExpiration && !request.IsExpirationValid)
+            {
+                return BadRequest("Expiration date must be in the future");
+            }
 
+            var baseUrl = $"{Request.Scheme}://{Request.Host}";
             var result = await _urlService.CreateUrlAsync(request, baseUrl);
+
             if (result == null)
             {
                 return Conflict("Custom alias already exists or creation failed");
@@ -44,7 +53,6 @@ namespace URLShortener.Api.Controllers
 
             return CreatedAtAction(nameof(GetUrlDetails), new { shortCode = result.ShortCode }, result);
         }
-
         [HttpGet("{shortCode}")]
         public async Task<ActionResult<UrlDetailsResponse>> GetUrlDetails(string shortCode)
         {
@@ -55,16 +63,24 @@ namespace URLShortener.Api.Controllers
             {
                 return NotFound("Short URL not found");
             }
+
             return Ok(result);
         }
-
         [HttpPut("{shortCode}")]
         public async Task<IActionResult> UpdateUrl(string shortCode, [FromBody] UpdateUrlRequest request)
         {
+            if (!request.HasAnyUpdates)
+            {
+                return BadRequest("No updates provided");
+            }
             var validationResult = await _updateValidator.ValidateAsync(request);
             if (!validationResult.IsValid)
             {
                 return BadRequest(validationResult.Errors.Select(e => e.ErrorMessage));
+            }
+            if (request.HasExpirationUpdate && !request.IsExpirationValid)
+            {
+                return BadRequest("Expiration date must be in the future");
             }
 
             var success = await _urlService.UpdateUrlAsync(shortCode, request);
@@ -75,7 +91,6 @@ namespace URLShortener.Api.Controllers
 
             return NoContent();
         }
-
         [HttpDelete("{shortCode}")]
         public async Task<IActionResult> DeleteUrl(string shortCode)
         {
@@ -84,7 +99,7 @@ namespace URLShortener.Api.Controllers
             {
                 return NotFound("Short URL not found");
             }
+
             return NoContent();
         }
     }
-}

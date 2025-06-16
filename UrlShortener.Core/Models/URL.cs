@@ -1,4 +1,4 @@
-﻿namespace URLShortener.Core.Models;
+﻿namespace URLShortener.Domain.Models;
 
 public class Url
 {
@@ -16,13 +16,13 @@ public class Url
     public Url() {}
 
     public Url(
-        string shortCode,
-        string originalUrl,
-        DateTime createdAt,
-        DateTime? expiresAt,
-        long clickCount,
-        bool isActive,
-        bool customAlias)
+            string shortCode,
+            string originalUrl,
+            DateTime createdAt,
+            DateTime? expiresAt,
+            long clickCount,
+            bool isActive,
+            bool customAlias)
     {
         ShortCode = shortCode;
         OriginalUrl = originalUrl;
@@ -32,44 +32,41 @@ public class Url
         IsActive = isActive;
         CustomAlias = customAlias;
     }
+    public Url(string shortCode, string originalUrl, DateTime? expiresAt, bool isCustomAlias)
+    {
+        ShortCode = shortCode;
+        OriginalUrl = originalUrl;
+        CreatedAt = DateTime.UtcNow;
+        ExpiresAt = expiresAt;
+        ClickCount = 0;
+        IsActive = true;
+        CustomAlias = isCustomAlias;
+    }
+    public void IncrementClickCount()
+    {
+        ClickCount++;
+    }
+
+    public void Deactivate()
+    {
+        IsActive = false;
+    }
+
+    public void UpdateDetails(string? newOriginalUrl, DateTime? newExpiresAt)
+    {
+        if (!string.IsNullOrEmpty(newOriginalUrl))
+            OriginalUrl = newOriginalUrl;
+
+        if (newExpiresAt.HasValue)
+            ExpiresAt = newExpiresAt;
+    }
+
+    public bool CanBeAccessed()
+    {
+        return IsActive && !IsExpired;
+    }
 }
 
-public class UrlAnalytics
-{
-    public string ShortCode { get; set; } = string.Empty;
-    public DateTime ClickDate { get; set; }
-    public DateTime ClickTimestamp { get; set; }
-    public string UserAgent { get; set; } = string.Empty;
-    public string IpAddress { get; set; } = string.Empty;
-}
+    
 
-public class CreateUrlRequest
-{
-    public string OriginalUrl { get; set; } = string.Empty;
-    public DateTime? ExpiresAt { get; set; }
-    public string? CustomAlias { get; set; }
-}
 
-public class UpdateUrlRequest
-{
-    public string? OriginalUrl { get; set; }
-    public DateTime? ExpiresAt { get; set; }
-}
-
-public class UrlResponse
-{
-    public string ShortCode { get; set; } = string.Empty;
-    public string OriginalUrl { get; set; } = string.Empty;
-    public string ShortUrl { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
-    public DateTime? ExpiresAt { get; set; }
-    public long ClickCount { get; set; }
-    public bool IsActive { get; set; }
-    public bool IsExpired { get; set; }
-    public bool IsPermanent { get; set; }
-}
-
-public class UrlDetailsResponse : UrlResponse
-{
-    public List<UrlAnalytics> RecentClicks { get; set; } = new();
-}
