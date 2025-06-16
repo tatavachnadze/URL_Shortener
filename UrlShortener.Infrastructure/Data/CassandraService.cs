@@ -123,8 +123,6 @@ public class CassandraService : ICassandraService
         {
             var existingUrl = await GetUrlAsync(shortCode);
             if (existingUrl == null) return false;
-
-            // Use domain model business logic for updates
             existingUrl.UpdateDetails(request.OriginalUrl, request.ExpiresAt);
 
             await _session.ExecuteAsync(_updateUrlStatement!.Bind(
@@ -207,7 +205,7 @@ public class CassandraService : ICassandraService
             row.GetValue<string>("original_url"),
             row.GetValue<DateTime>("created_at"),
             row.GetValue<DateTime?>("expires_at"),
-            0, // Click count will be retrieved separately if needed
+            0,
             row.GetValue<bool>("is_active"),
             row.GetValue<bool>("custom_alias")
         )).ToList();

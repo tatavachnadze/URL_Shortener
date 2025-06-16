@@ -9,7 +9,6 @@ using URLShortener.Domain.Models;
 
 namespace URLShortener.Core.Validators;
 
-// why? 
 public class CreateUrlRequestValidator : AbstractValidator<CreateUrlRequest>
 {
     public CreateUrlRequestValidator()

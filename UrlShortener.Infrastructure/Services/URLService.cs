@@ -48,7 +48,6 @@ namespace URLShortener.Infrastructure.Services
                 }
             }
 
-            // Use business constructor for new URL creation
             var url = new Url(shortCode, request.OriginalUrl, request.ExpiresAt, request.HasCustomAlias);
 
             var success = await _cassandraService.CreateUrlAsync(url);
@@ -60,7 +59,6 @@ namespace URLShortener.Infrastructure.Services
 
             _logger.LogInformation("Successfully created URL with short code {ShortCode}", shortCode);
 
-            // Use mapping extension for response creation
             return url.ToResponse(baseUrl);
         }
 
@@ -78,7 +76,6 @@ namespace URLShortener.Infrastructure.Services
             _logger.LogInformation("Retrieved URL details for {ShortCode} with {AnalyticsCount} analytics records",
                 shortCode, analytics.Count);
 
-            // Use mapping extension for detailed response creation
             return url.ToDetailsResponse(baseUrl, analytics);
         }
 
@@ -93,8 +90,6 @@ namespace URLShortener.Infrastructure.Services
                 _logger.LogWarning("URL not found in database: {ShortCode}", shortCode);
                 return null;
             }
-
-            // Use domain model business logic method
             if (!url.CanBeAccessed())
             {
                 _logger.LogWarning("URL cannot be accessed: {ShortCode} - Active: {IsActive}, Expired: {IsExpired}",
@@ -148,13 +143,10 @@ namespace URLShortener.Infrastructure.Services
         {
             try
             {
-                // Increment click counter
                 await _cassandraService.IncrementClickCountAsync(shortCode);
 
-                // Use business constructor for analytics creation
                 var analytics = new UrlAnalytics(shortCode, userAgent, ipAddress);
 
-                // Store analytics data
                 await _cassandraService.AddAnalyticsAsync(analytics);
 
                 _logger.LogDebug("Successfully recorded click for {ShortCode} from IP {IpAddress}",
